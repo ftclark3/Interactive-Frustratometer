@@ -93,7 +93,7 @@ proc start_python_for_mol {molid} {
     }
 
     puts "Starting Python server for molecule $molid using file: $struct_file"
-    set ::py_pipe [open "|python3 interactive_update.py \"$struct_file\"" r+]
+    set ::py_pipe [open "|python3 update_frustration.py \"$struct_file\"" r+]
     fconfigure $::py_pipe -buffering line -blocking 1 
 
     # We wait here until Python says it is ready, or asks for user input
