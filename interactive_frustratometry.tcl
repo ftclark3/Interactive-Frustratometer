@@ -306,71 +306,97 @@ proc auto_update_on_move {} {
     # TYPICALLY, IT WILL BE NECESSARY TO RECALCULATE THE FRUSTRATOGRAM,
     # AND WE HAVE OPTIMIZED THE SPEED OF THIS CALCULATION FOR THE
     # PURPOSES OF THIS INTERACTIVE SCRIPT.
-    # -----------------------------------------------------------------
+    # ----------------------------------------------------------------
+    # Get current state
+    set current_frame [molinfo $molid get frame]
+    set struct_file [lindex [lindex [molinfo $molid get filename] 0] 0]
+    
+    # Create a safe, unique filename (e.g., myprotein.pdb_frame_5.dat)
+    set safe_name [file tail $struct_file]
+    set cache_file [file join $::frust_cache_dir "${safe_name}_frame_${current_frame}.dat"]
 
-    if {[lsearch [molinfo list] $molid] == -1} { return }
-
-    # Get the interaction centers (Physics)
+    # Get the interaction centers and visual anchors
     set sel_phys [atomselect $molid "name CB or (resname GLY IGL and name CA)"]
     set curr_phys [$sel_phys get {x y z}]
     $sel_phys delete
 
-    # Get the visual anchors (Visual)
     set sel_vis [atomselect $molid "name CA"]
     set curr_vis [$sel_vis get {x y z}]
     $sel_vis delete
 
     set needs_redraw 0
 
-    # TIER 1: Did the physics change?
-    if {$curr_phys ne $::last_physics_pos} {
+    # -----------------------------------------------------------------
+    # CACHE CHECK: Did the frame change?
+    # -----------------------------------------------------------------
+    if {$current_frame != $::last_frame} {
+        set ::last_frame $current_frame
+        
+        if {[file exists $cache_file]} {
+            # FAST PATH: Read directly from disk, bypass Python
+            set fp [open $cache_file r]
+            set ::cached_frustration_data [read $fp]
+            close $fp
+            
+            # CRITICAL: Sync trackers so we don't immediately trigger a recalculation!
+            set ::last_physics_pos $curr_phys
+            set ::last_visual_pos $curr_vis
+            set needs_redraw 1
+        }
+    }
 
+    # -----------------------------------------------------------------
+    # TIER 1: Did the physics change? (Cache miss OR interactive drag)
+    # -----------------------------------------------------------------
+    if {$curr_phys ne $::last_physics_pos} {
+        
         set ::last_physics_pos $curr_phys
         set ::last_visual_pos $curr_vis
-
-        # Flatten the coordinate list { {x1 y1 z1} {x2 y2 z2} } -> "x1 y1 z1 x2 y2 z2"
-        # and send it straight down the pipe
+        
+        # Send to Python
         puts $::py_pipe [join $curr_phys " "]
         flush $::py_pipe
-
-        # Wait patiently for Python to compute and send data back
+        
         set new_data ""
         while {1} {
             set char_count [gets $::py_pipe line]
-
-            # check if our pipe broke due to the python script crashing
             if {$char_count == -1} {
                 puts "ERROR: python script crashed!"
-                # close the broken pipe
-                catch {close $::py_pipe}
+                catch {close $::py_pipe} 
                 return
-            }
-
-            if {$line eq "__END_OF_CALC__"} { break }
+            } 
+            if {$line eq "__END_OF_CALC__"} { break } 
             append new_data $line "\n"
-        }
-
-        # Cache the new data
+        } 
+        
         set ::cached_frustration_data $new_data
         set needs_redraw 1
 
-    # TIER 2: Did only the atomic positions change?
+        # WRITE CACHE: Save calculation to disk for instant loading next time.
+        # If this was an interactive drag, it overwrites the stale frame cache.
+        if {[catch {
+            set fp [open $cache_file w]
+            puts -nonewline $fp $new_data
+            close $fp
+        } err]} {
+            puts "Warning: Could not write cache file $cache_file ($err)"
+        }
+
+    # -----------------------------------------------------------------
+    # TIER 2: Did only visual anchors change? (e.g., smoothing window)
+    # -----------------------------------------------------------------
     } elseif {$curr_vis ne $::last_visual_pos} {
         set ::last_visual_pos $curr_vis
         set needs_redraw 1
     }
 
-    # Redraw only if something actually moved
+    # Redraw only if something actually moved or frame changed
     if {$needs_redraw} {
         draw_lines_from_cache $molid
     }
 
-    # Reschedule (10ms is fine for updating where the lines are drawn
-    #             but we might need to use a longer period to allow
-    #             frustration calculations to finish between line draw updates)
     set ::coord_poll_id [after 10 auto_update_on_move]
 }
-
 
 # Establish connection to the persistent Python script
 #set ::py_pipe [open "|python3 interactive_update.py" r+]
@@ -384,6 +410,14 @@ set ::cached_frustration_data ""
 array set ::mol_initial_atoms {}
 
 
-# Clean up and start
+# Setup persistent cache directory in user's home folder
+set ::frust_cache_dir [file join ~ ".interactive-frustratometer" "frustratograms"]
+file mkdir $::frust_cache_dir
+
+# Add a tracker for the frame number
+set ::last_frame -1
+
+# main loop
 catch {after cancel $::coord_poll_id}
 auto_update_on_move
+
