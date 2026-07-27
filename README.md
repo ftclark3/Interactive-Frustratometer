@@ -7,5 +7,7 @@ VMD TCL scripts can pass coordinates to Python through a pipe and receive the re
 Usage: `vmd traj.pdb -e interactive_frustratometry.tcl`, where `interactive_frustratometry.tcl` and `update_frustration.py` are in the working directory alongside `traj.pdb`. 
 
 ## To Do
-- Update the Python script to actually calculate frustration instead of passing back a predetermined result
-- Add a function to the TCL script to save upon user request the frustratogram currently shown on the screen
+- Add a function to the TCL script to save upon user request the frustratogram currently shown on the screen (work in progress; see save_frustratogram branch)
+
+## See Also
+- I haven't tried it, but you may also be interested in [frustrapy](https://github.com/engelberger/frustrapy/tree/main)
