@@ -1,5 +1,7 @@
-# SCRIPT TO CALCULATE FRUSTRATION ON-THE-FLY AS COORDINATES
-# OF A STRUCTURE ARE CHANGED.
+# ABOUT THIS SCRIPT 
+
+# USE WITH VMD TO CALCULATE FRUSTRATION ON-THE-FLY 
+# AS COORDINATES OF A STRUCTURE ARE CHANGED.
 #
 # IF MULTIPLE MOLECULES ARE LOADED,
 # THE FRUSTRATOGRAM WILL BE CALCULATED FOR THE TOP MOLECULE
@@ -18,19 +20,29 @@
 # THAT YOUR STRUCTURE FILE USES IGL/IPR/NGP RESIDUE NAMES
 # INSTEAD OF STANDARD 3-LETTER RESIDUE NAMES)
 
-
 # =====================================================================
-# Safe Tkinter Pop-up for User Input
+
+# PROCEDURE DEFINITIONS
+
+# procedure to clear the lines of the frustratogram, 
+# as stored in the global frustratogram_lines array
+proc clear_frustratogram_lines {molid} {
+    foreach gid $::frustratogram_lines {
+        catch {graphics $molid delete $gid}
+    }
+    set ::frustratogram_lines {}
+}
+
+# Tkinter Pop-up for User Input
 # (need to ask the user for the sequence and chain breaks if
 #  first attempt at structure initialization fails)
-# =====================================================================
 proc ask_user_for_python {prompt_text} {
     package require Tk
     set ::user_response ""
 
     set t [toplevel .py_prompt]
     wm title $t "Frustratometer: Input Required"
-    wm attributes $t -topmost 1 ;# Force window above VMD
+    wm attributes $t -topmost 1 ;# put the window on top of VMD
 
     label $t.lbl -text $prompt_text -wraplength 400 -justify left
     entry $t.ent -textvariable ::user_response -width 60
@@ -65,9 +77,7 @@ proc kill_frustration_script {reason} {
     }
 
     # Clear any drawn lines on the active molecule
-    if {$::active_molid != -1 && [lsearch [molinfo list] $::active_molid] != -1} {
-        catch {graphics $::active_molid delete all}
-    }
+    clear_frustratogram_lines
 
     # This procedure is called from the polling loop when it is determined that the
     # user has altered the topology. The actual termination is handled
@@ -77,7 +87,7 @@ proc kill_frustration_script {reason} {
 
 
 # =====================================================================
-# The Context Switcher (Reads from disk)
+# procedure to 
 # =====================================================================
 proc start_python_for_mol {molid} {
     if {[info exists ::py_pipe]} { catch {close $::py_pipe} }
@@ -252,6 +262,25 @@ proc draw_lines_from_cache {molid} {
 # =====================================================================
 proc auto_update_on_move {} {
 
+    # select the index of the top molecule 
+    set top_mol [molinfo top]
+
+    # if the top molecule changed (including the case that we deleted
+    # the only open molecule, in which VMD sets top to -1),
+    # then delete the frustratogram lines 
+    if {$top_mol != $::active_molid} {
+        clear_frustratogram_lines $::active_molid
+    }
+
+    # A top index of -1 means that there are no molecules open in VMD.
+    # In this case, there is no calculation to run, so we 
+    # schedule another run of this procedure a few ms in the future
+    # and then exit.
+    if {$top_mol == -1} {
+        set ::coord_poll_id [after 10 auto_update_on_move]
+        return
+    }
+
     # -----------------------------------------------------------------
     # THE TOPOLOGY WATCHER (Kill Switch)
     # -----------------------------------------------------------------
@@ -276,20 +305,10 @@ proc auto_update_on_move {} {
     # -----------------------------------------------------------------
     # THE CONTEXT SWITCHER (resets python if we change our molecule)
     # -----------------------------------------------------------------
-    set top_mol [molinfo top]
 
-    if {$top_mol == -1} {
-        set ::coord_poll_id [after 10 auto_update_on_move]
-        return
-    }
 
     # If the user switched to a different molecule
     if {$top_mol != $::active_molid} {
-
-        # Clear lines on the old molecule before switching
-        if {$::active_molid != -1 && [lsearch [molinfo list] $::active_molid] != -1} {
-            catch {graphics $::active_molid delete all}
-        }
 
         # If start_python_for_mol returns 0 (fails), abort the loop entirely
         if {![start_python_for_mol $top_mol]} {
@@ -373,18 +392,42 @@ proc auto_update_on_move {} {
 }
 
 
-# Establish connection to the persistent Python script
-#set ::py_pipe [open "|python3 interactive_update.py" r+]
-#fconfigure $::py_pipe -buffering line -blocking 1
+# ======================================================================
+# MAIN BLOCK
 
-# Global state trackers
+
 set ::active_molid -1
 set ::last_physics_pos ""
 set ::last_visual_pos ""
 set ::cached_frustration_data ""
+
+
 array set ::mol_initial_atoms {}
 
+# array to hold the ids of the graphics (lines)
+# associated with the frustratogram; 
+# allows us to clean up the frustratogram without 
+# destroying any other graphics the user might have created
+set ::frustratogram_lines {}
 
-# Clean up and start
+# When this script is first launched, ::coord_poll_id is not defined,
+# so $::coord_poll_id throws an error that is ignored because of the 
+# catch command on the below line of code. However, if this script is
+# sourced again, the main loop from the previous launch of this
+# script is not automatically cancelled. The main loop, which is the
+# body of the auto_update_on_move procedure, perpetuates itself by
+# scheduling another invocation of itself for 10 ms in the future 
+# using 'after 10 auto_update_on_move'. We can break the loop by 
+# cancelling the next scheduled run of auto_update_on_move,
+# whose command id is stored in coord_poll_id.
 catch {after cancel $::coord_poll_id}
+
+# The auto_update_on_move procedure implements the main loop. 
+# If has the following parts:
+#  - topology check: if the topology of the active molecule is 
+                     different from the molecule's last known 
+                     topology, then exit (we can't accommodate
+                     changes to the topology)
+   -  
+#  - 
 auto_update_on_move
