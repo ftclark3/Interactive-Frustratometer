@@ -381,7 +381,6 @@ set ::last_visual_pos ""
 set ::cached_frustration_data ""
 
 
-array set ::mol_initial_atoms {}
 
 # array to hold the ids of the graphics (lines)
 # associated with the frustratogram; 
@@ -403,10 +402,7 @@ catch {after cancel $::coord_poll_id}
 
 # The auto_update_on_move procedure implements the main loop. 
 # If has the following parts:
-#  - topology check: if the topology of the active molecule is 
-                     different from the molecule's last known 
-                     topology, then exit (we can't accommodate
-                     changes to the topology)
-   -  
+#  -
+#   -  
 #  - 
 auto_update_on_move
