@@ -253,27 +253,6 @@ proc draw_lines_from_cache {molid} {
 proc auto_update_on_move {} {
 
     # -----------------------------------------------------------------
-    # THE TOPOLOGY WATCHER (Kill Switch)
-    # -----------------------------------------------------------------
-    foreach m [molinfo list] {
-        set current_atoms [molinfo $m get numatoms]
-
-        # Record atom count if we haven't seen this molecule yet
-        if {![info exists ::mol_initial_atoms($m)]} {
-            set ::mol_initial_atoms($m) $current_atoms
-        }
-
-        # Trip the kill switch if it changed!
-        # I guess this script will fail to catch cases where we change
-        # an atom name/element but that's far outside of what I would
-        # expect the user to try to do.
-        if {$current_atoms != $::mol_initial_atoms($m)} {
-            kill_frustration_script "Topology changed (atom count mismatch) in molecule $m.\n We are not sure that we can compute frustration correctly\n when the topology of a VMD entry is modified within a session. Out of an abundance of caution, this interactive frustration handler tcl script will be terminated. If you want to compare two similar structures, you can load them in VMD as different entries."
-            return ;# IMMEDIATELY exit so the loop cannot reschedule itself
-        }
-    }
-
-    # -----------------------------------------------------------------
     # THE CONTEXT SWITCHER (resets python if we change our molecule)
     # -----------------------------------------------------------------
     set top_mol [molinfo top]
