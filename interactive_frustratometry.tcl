@@ -250,10 +250,13 @@ proc draw_lines_from_cache {molid} {
             set style "dashed"
         } else { continue }
 
-        # draw the line
+        # draw the line and append its id to our list of graphics 
+        # so that it can be deleted later upon a change of coordinates 
+        # or switching to a new top molecule
         if {[info exists coords($c1,$resid1)] && [info exists coords($c2,$resid2)]} {
             graphics $molid color $color
-            graphics $molid line $coords($c1,$resid1) $coords($c2,$resid2) style $style width 2
+            set gid [graphics $molid line $coords($c1,$resid1) $coords($c2,$resid2) style $style width 2]
+            lappend ::frustratogram_lines $gid
         }
     }
 }
