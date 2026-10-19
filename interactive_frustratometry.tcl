@@ -62,9 +62,8 @@ proc ask_user_for_python {prompt_text} {
 
 
 # =====================================================================
-# Procedure to terminate this script,
-# called in a few different cases
-# (CTRL-F kill_frustration_script for details)
+# procedure to terminate this script upon failure of the python 
+# initialization code found in start_python_for_mol
 # =====================================================================
 proc kill_frustration_script {reason} {
     puts "\n=========================================================="
@@ -77,39 +76,37 @@ proc kill_frustration_script {reason} {
     }
 
     # Clear any drawn lines on the active molecule
-    clear_frustratogram_lines
-
-    # This procedure is called from the polling loop when it is determined that the
-    # user has altered the topology. The actual termination is handled
-    # in the calling scope, which throws an early return, causing the polling loop
-    # to end and this script to die naturally.
+    clear_frustratogram_lines $::active_molid
 }
 
 
 # =====================================================================
-# procedure to 
+# procedure to launch the python script, which will 
+# initialize the frustration-calculating python object (such as AWSEM)
+# from the appropriate structure file on disk
 # =====================================================================
 proc start_python_for_mol {molid} {
+    # close the existing python pipe (if it exists)
     if {[info exists ::py_pipe]} { catch {close $::py_pipe} }
 
     # Extract the original file path.
     # 'molinfo get filename' returns a nested list: {{file1.pdb} {file2.dcd}}
-    # We grab the very first file, which is almost always the structure file.
+    # We grab the very first file, which should be a PDB that is compatible
+    # with the structure parser in the main python frustratometer code
     set struct_file [lindex [lindex [molinfo $molid get filename] 0] 0]
 
-    # Verify the file still exists on disk
+    # Verify that the file exists in the location that we expect
     if {![file exists $struct_file]} {
         kill_frustration_script "Cannot locate original structure file on disk: $struct_file"
-        return 0 ;# Return failure flag
-    }
-
-    puts "Starting Python server for molecule $molid using file: $struct_file"
-    # helpful exception handling in the event that python fails to launch
-    if {[catch {open "|python3 -u update_frustration.py \"$struct_file\"" r+} ::py_pipe]} {
-        kill_frustration_script "OS level failure: $::py_pipe"
         return 0
     }
 
+    puts "Starting Python server for molecule $molid using file: $struct_file"
+    # launch the update_frustration.py script and set up pipe to its stdin/stdout
+    if {[catch {open "|python3 -u update_frustration.py \"$struct_file\"" r+} ::py_pipe]} {
+        kill_frustration_script "pipe failure: $::py_pipe"
+        return 0
+    }
     fconfigure $::py_pipe -buffering line -blocking 1
 
     # We wait here until Python says it is ready, or asks for user input
@@ -121,7 +118,7 @@ proc start_python_for_mol {molid} {
         if {[eof $::py_pipe] || $char_count == -1} {
             # Close the pipe inside a catch block to extract the Python traceback
             catch {close $::py_pipe} python_error
-            kill_frustration_script "Python failed to start.\nTraceback/Error:\n$python_error"
+            kill_frustration_script "Python failed to start.\nPython error was:\n$python_error"
             return 0
         }
 
@@ -129,7 +126,8 @@ proc start_python_for_mol {molid} {
             puts "Frustratometer initialized and ready!"
             break
         } elseif {$line eq "__PROMPT__"} {
-            # Python wants input. The very next line in the pipe is the question.
+            # Python wants input. 
+            # The very next line in the pipe is the question for the user
             gets $::py_pipe prompt_text
 
             # Show the pop-up and wait for user to hit submit
@@ -144,44 +142,50 @@ proc start_python_for_mol {molid} {
         }
     }
 
-    set ::active_molid $molid
-    set ::last_physics_pos ""
-    set ::last_visual_pos ""
-    set ::cached_frustration_data ""
+    # initialize or clear preexisting coorindates and data 
+    # that are no longer relevant
+    set ::last_physics_pos "PLACEHOLDER"
+    set ::last_visual_pos "PLACEHOLDER"
+    set ::cached_frustration_data "PLACEHOLDER"
 
-    return 1 ;# Return success flag
+    return 1
 }
 
 
 # =====================================================================
-#    The Drawing Function
+#    procedure to draw the frustratogram lines
 #
-#    Whenever any non-glycine CA atom has been moved,
-#    the positions of the lines on the screen may need to be updated,
-#    so we call this function.
+#    Whenever a CA atom is moved, we need to at least update the 
+#    endpoints of some of the frustratogram lines on the screen.
+#    
+#    We will likely also need to send the new coordinates to python 
+#    and receive new frustration data (which chains/residues to 
+#    connect with lines and what kinds of interactions those lines 
+#    describe (short, long, water=mediated; minimally frustrated,
+#    highly frustrated)) back from python. This is handled by 
+#    the auto_update_on_move procedure.
 #
-#    If a glycine CA atom or any CB atom is moved, then we may need to
-#    update not only the positions of the lines on the screen, but also
-#    the colors and styles of the lines, possibly adding or deleting
-#    lines. Such adjustments will trigger a recalculation of the
-#    frustratogram, followed by this function.
+#    Here, we just clear stale data and then draw lines based on the 
+#    new frustration data from the global scope. 
 #
 # =====================================================================
-
 proc draw_lines_from_cache {molid} {
 
-
     # clear any previously drawn lines
-    graphics $molid delete all
+    clear_frustratogram_lines $molid
 
-
-    # If we have no data yet, abort silently
-    if {$::cached_frustration_data eq ""} { return }
-
+    # In rare cases, python might not identify any minimally or highly 
+    # frustrated contacts. Since we've already cleared any preexisting 
+    # lines, the correct thing to do is to return. But this 
+    # circumstance was probably not expected by the user, so we should 
+    # explain what is going on.
+    if {$::cached_frustration_data eq ""} { 
+        puts "Python found no minimally or highly frustrated contacts, so there is nothing to draw!"    
+        return
+    }
 
     # get information about the lines that need to be drawn
     set lines [split $::cached_frustration_data "\n"]
-
 
     # build index of all CA coordinates using (chain, resid) pairs
     # (these coordinates are needed to determine the endpoints of the lines)
@@ -195,7 +199,6 @@ proc draw_lines_from_cache {molid} {
         set chain [string trim $chain]
         set coords($chain,$resid) [list $x $y $z]
     }
-
 
     # loop over per-line information, drawing lines
     # based on the CA coordinates and frustration data that we just calculated
@@ -232,7 +235,9 @@ proc draw_lines_from_cache {molid} {
         set contact_type [lindex $words 12]
         set state        [lindex $words 13]
 
-        # determine whether/how to draw line
+        # determine whether/how to draw line;
+        # "neutral" pairs are generally not expected to be 
+        # returned through the pipe
         if {$state eq "neutral"} { continue }
         if {$state eq "minimally"} {
             set color "green"
@@ -248,16 +253,14 @@ proc draw_lines_from_cache {molid} {
         # draw the line
         if {[info exists coords($c1,$resid1)] && [info exists coords($c2,$resid2)]} {
             graphics $molid color $color
-            #graphics $molid line $coords($res1_idx) $coords($res2_idx) style $style width 2
             graphics $molid line $coords($c1,$resid1) $coords($c2,$resid2) style $style width 2
         }
     }
 }
 
 # =====================================================================
-#  The Two-Tier Polling Loop:
-#  Periodically checks whether coordinates have changed and
-#  moves the locations of the ends of the lines drawn on the screen,
+#  procedure that periodically checks whether coordinates have changed 
+#  and moves the locations of the ends of the lines drawn on the screen,
 #  first recalculating which lines need to be drawn, if necessary.
 # =====================================================================
 proc auto_update_on_move {} {
@@ -281,67 +284,69 @@ proc auto_update_on_move {} {
         return
     }
 
-    # -----------------------------------------------------------------
-    # THE CONTEXT SWITCHER (resets python if we change our molecule)
-    # -----------------------------------------------------------------
-
-
-    # If the user switched to a different molecule
+    # check if the user changed the top molecule 
+    # and, if so, reboot the frustration-calculating python code
+    # by calling start_python_for_mol
     if {$top_mol != $::active_molid} {
-
-        # If start_python_for_mol returns 0 (fails), abort the loop entirely
         if {![start_python_for_mol $top_mol]} {
+            # If the python startup failed, then 
+            # return now and don't schedule another run 
+            # of this procedure. The user will need to 
+            # re-source this script with a different
+            # molecule selected as top if they want to 
+            # continue to display frustratograms.
             return
         }
-
     }
 
-    set molid $::active_molid
+    # set the active molecule to the top molecule
+    set ::active_molid $top_mol
 
-
-    # -----------------------------------------------------------------
-    # CHECK IF WE NEED TO REDRAW OUR LINES, WITH OR WITHOUT
-    # A RECALCULATION OF THE FRUSTRATOGRAM.
-    # TYPICALLY, IT WILL BE NECESSARY TO RECALCULATE THE FRUSTRATOGRAM,
-    # AND WE HAVE OPTIMIZED THE SPEED OF THIS CALCULATION FOR THE
-    # PURPOSES OF THIS INTERACTIVE SCRIPT.
-    # -----------------------------------------------------------------
-
-    if {[lsearch [molinfo list] $molid] == -1} { return }
-
-    # Get the interaction centers (Physics)
-    set sel_phys [atomselect $molid "name CB or (resname GLY IGL and name CA)"]
+    # get the coordinates of the CB atoms (CA in the case of glycine), 
+    # which determine the pairwise interaction energies
+    set sel_phys [atomselect $::active_molid "name CB or (resname GLY and name CA)"]
     set curr_phys [$sel_phys get {x y z}]
     $sel_phys delete
 
-    # Get the visual anchors (Visual)
-    set sel_vis [atomselect $molid "name CA"]
+    # get the coordinates of the CA atoms, which will become the  
+    # endpoints of the frustratogram lines that we draw
+    set sel_vis [atomselect $::active_molid "name CA"]
     set curr_vis [$sel_vis get {x y z}]
     $sel_vis delete
 
+    # If either of these arrays (which are just strings of different lengths in TCL)
+    # changed since last time ("last time" being an empty string if this is the 
+    # first time through the loop since we most recently set/changed the top molecule),
+    # then we will recalculate the frustratogram (if needed) 
+    # and update its visual representation.
     set needs_redraw 0
-
-    # TIER 1: Did the physics change?
     if {$curr_phys ne $::last_physics_pos} {
 
         set ::last_physics_pos $curr_phys
         set ::last_visual_pos $curr_vis
 
         # Flatten the coordinate list { {x1 y1 z1} {x2 y2 z2} } -> "x1 y1 z1 x2 y2 z2"
-        # and send it straight down the pipe
+        # and send it straight down the pipe to the python code
         puts $::py_pipe [join $curr_phys " "]
         flush $::py_pipe
 
-        # Wait patiently for Python to compute and send data back
+        # Read instructions (in the form of a long string)
+        # from the pipe until we reach the special 
+        # __END_of_CALC__ signal
         set new_data ""
         while {1} {
             set char_count [gets $::py_pipe line]
 
             # check if our pipe broke due to the python script crashing
             if {$char_count == -1} {
-                puts "ERROR: python script crashed!"
+                puts "ERROR: python frustration calculation crashed. Did you change the topology of your molecule?"
                 # close the broken pipe
                 catch {close $::py_pipe}
+                # If the python frustration calculation failed, then 
+                # return now and don't schedule another run 
+                # of this procedure. It is likely that the user has 
+                # edited the topology of the active molecule (not supported)
+                # or there is an error with this script.
                 return
             }
 
@@ -349,24 +354,24 @@ proc auto_update_on_move {} {
             append new_data $line "\n"
         }
 
-        # Cache the new data
+        # update the data to be passed into the drawing function
+        # draw_lines_from_cache a few lines below this point
         set ::cached_frustration_data $new_data
         set needs_redraw 1
 
-    # TIER 2: Did only the atomic positions change?
     } elseif {$curr_vis ne $::last_visual_pos} {
         set ::last_visual_pos $curr_vis
         set needs_redraw 1
     }
 
-    # Redraw only if something actually moved
     if {$needs_redraw} {
-        draw_lines_from_cache $molid
+        draw_lines_from_cache $::active_molid
     }
 
-    # Reschedule (10ms is fine for updating where the lines are drawn
-    #             but we might need to use a longer period to allow
-    #             frustration calculations to finish between line draw updates)
+    # Schedule this procedure to be called again in 10 ms 
+    # so that the frustratograms updates quickly in response to 
+    # changes in the coordinates resulting from changes in the 
+    # trajectory frame or editing of the structure in the GUI.
     set ::coord_poll_id [after 10 auto_update_on_move]
 }
 
@@ -375,14 +380,42 @@ proc auto_update_on_move {} {
 # MAIN BLOCK
 
 
+# active_molid is the id of the molecule that we just drew the 
+# frustratogram for. Whenever active_molid differs from VMD's "top" 
+# molecule, we update active_molid to the top molecule's id and 
+# reboot the frustration-calculating python script, feeding it the 
+# topology and coordinates of the new top molecule. When no  
+# molecules are present in the VMD workspace, the active_molid is set to 
+# -1, just like the value of "molinfo top". We set active_molid to -1
+# when initializing this script as a placeholder. It will be checked 
+# and updated immediately at the beginning of the auto_update_on_move
+# procedure (called below).
 set ::active_molid -1
-set ::last_physics_pos ""
-set ::last_visual_pos ""
-set ::cached_frustration_data ""
 
+# last_physics_pos holds the CB (CA in the case of glycine)
+# coordinates of the molecular configuration used for the 
+# most recent frustratogram draw. We check this periodically
+# (once during every call to the auto_update_on_move procedure)
+# to determine whether we need to recalculate the frustraogram
+set ::last_physics_pos "PLACEHOLDER"
 
+# last_visual_pos holds the CA coordinates that are to be 
+# connected by frustratogram lines. We need to update the
+# frustratogram by moving the lines (and very likely also
+# recalculating the frustration) whenever these coordinates
+# change.
+set ::last_visual_pos "PLACEHOLDER"
 
-# array to hold the ids of the graphics (lines)
+# cached_frustration_data is a big string holding 
+# concatenated lines of frustration information in the form 
+# of frustratometer server output, meaning lines formatted like 
+#     f'{resid1} {resid2} {chain1} {chain2} foo foo foo foo foo foo foo foo {style} {descriptor}\n'
+# (the fields labeled "foo" don't matter for our purposes here;
+# "style" is either "short", "long", or "water-mediated";
+# and "descriptor" is either "minimally" or "highly")
+set ::cached_frustration_data "PLACEHOLDER"
+
+# frustratogram_lines holds the ids of the graphics (lines)
 # associated with the frustratogram; 
 # allows us to clean up the frustratogram without 
 # destroying any other graphics the user might have created
@@ -402,7 +435,19 @@ catch {after cancel $::coord_poll_id}
 
 # The auto_update_on_move procedure implements the main loop. 
 # If has the following parts:
-#  -
-#   -  
-#  - 
+#  - check which molecule we need to draw the frustratogram for 
+#    (the top molecule)
+#  - check whether the coordinates have been changed since the 
+#    previous iteration of the loop
+#  - recaculate the frustratogram (if needed)
+#  - adjust the number color, and positions of the endpoints 
+#    of the lines (if needed)
+# Errors are expected to occur only within the python script 
+# that parses the structures and calculates the frustration.
+# When an error occurs in the python script, this TCL script 
+# should print the error to the terminal that is running VMD 
+# and then effectively terminate (choose not to schedule 
+# another call to the auto_update_on_move function).
+# Runtime errors that originate in this TCL script should be 
+# viewed as bugs.
 auto_update_on_move
