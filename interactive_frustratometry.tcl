@@ -287,8 +287,8 @@ proc auto_update_on_move {} {
         return
     }
 
-    # check if the user changed the top molecule 
-    # and, if so, reboot the frustration-calculating python code
+    # if the user changed the top molecule, we need to 
+    # reboot the frustration-calculating python code
     # by calling start_python_for_mol
     if {$top_mol != $::active_molid} {
         if {![start_python_for_mol $top_mol]} {
