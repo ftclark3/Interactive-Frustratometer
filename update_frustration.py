@@ -144,7 +144,11 @@ chains, resids, chain_breaks = validate_structure(pdb_filename)
 try:
     # this way of setting up from a Structure won't work if it's 
     # an openawsem structure with IGL/IPR/NGP resnames instead of real resnames
-    s = Structure(pdb_filename, repair_pdb=False, sparse=True)
+    #s = Structure(pdb_filename, repair_pdb=False, sparse=True)
+    # None means first try without repairing pdb, the try with repairing pdb if it fails.
+    # Weirdly, multi-frame pdb files (such as 9yfc.pdb) might fail with repair_pdb=False
+    # but not with repair_pdb=True.
+    s = Structure(pdb_filename, repair_pdb=None, sparse=True)
     #s = Structure('2026716185347387546.pdb', repair_pdb=False, sparse=True)
     #s = Structure('aligned_first-openmmawsem.pdb', repair_pdb=False, sparse=True)
     dists = s.distance_matrix 
