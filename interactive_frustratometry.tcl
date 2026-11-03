@@ -307,7 +307,9 @@ proc auto_update_on_move {} {
 
     # get the coordinates of the CB atoms (CA in the case of glycine), 
     # which determine the pairwise interaction energies
-    set sel_phys [atomselect $::active_molid "name CB or (resname GLY and name CA)"]
+    # (IGL is usually used for glycine in openawsem format PDB files, 
+    # so we select those in addition to GLY)
+    set sel_phys [atomselect $::active_molid "name CB or (resname GLY IGL and name CA)"]
     set curr_phys [$sel_phys get {x y z}]
     $sel_phys delete
 
