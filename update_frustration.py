@@ -58,7 +58,7 @@ def validate_structure(pdb_filename):
 # Function to format contacts like a SparseMatrix,
 # returning lists of row indices, column indices, and data
 @numba.njit(parallel=False) 
-def get_sparse_contacts(coords, cutoff=40.0):
+def get_sparse_contacts(coords, cutoff=40.0, minimum_sequence_separation=1):
     # parallelization would be tricky because we don't know how many elements
     # to pre-allocate to the array
     m = coords.shape[0]
@@ -67,7 +67,7 @@ def get_sparse_contacts(coords, cutoff=40.0):
     data = []
     # Numba runs this double loop "instantly"
     for i in range(m):
-        for j in range(i + 1, m):
+        for j in range(i + minimum_sequence_separation, m):
             # Unrolling the math is faster than using np.linalg
             dx = coords[i, 0] - coords[j, 0]
             dy = coords[i, 1] - coords[j, 1]
@@ -222,10 +222,12 @@ while True:
             #exit()
             coords = np.array(floats).reshape((-1,3)) # some number of atoms x 3 coordinates each
             dists = pdist(coords) # note this is the flattened upper triangular part of the matrix
-            rows, cols, data = get_sparse_contacts(coords, cutoff=40.0) # 40 used for electrostatics
+            rows, cols, data = get_sparse_contacts(coords, cutoff=f.distance_cutoff_contact, # restrict selection to things that won't have an np.nan frustration index
+                minimum_sequence_separation=f.min_sequence_separation_contact) # restrict selection to things that won't have an np.nan frustration index
             sm = SparseMatrix(rows, cols, data=data, shape=coords.shape[0])
             f.change_conformation(sm, sm, sm, sm)
             frustration_indices = f.configurational_frustration()[sm.row, sm.col]
+            assert not np.any(np.isnan(frustration_indices))
             rho1 = f.rho_r[sm.row]
             rho2 = f.rho_r[sm.col]
             sigma_wats = 0.25 * (1 - np.tanh(f.eta_sigma * (rho1 - f.rho_0))) * (1 - np.tanh(f.eta_sigma * (rho2 - f.rho_0)))
