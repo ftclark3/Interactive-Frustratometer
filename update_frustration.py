@@ -223,7 +223,8 @@ while True:
             coords = np.array(floats).reshape((-1,3)) # some number of atoms x 3 coordinates each
             dists = pdist(coords) # note this is the flattened upper triangular part of the matrix
             rows, cols, data = get_sparse_contacts(coords, cutoff=f.distance_cutoff_contact, # restrict selection to things that won't have an np.nan frustration index
-                minimum_sequence_separation=f.min_sequence_separation_contact) # restrict selection to things that won't have an np.nan frustration index
+                ) # whether to include the minimum_sequence_separation switch below is a complex question; we may uncomment this line soon
+                #minimum_sequence_separation=f.min_sequence_separation_contact) # restrict selection to things that won't have an np.nan frustration index
             sm = SparseMatrix(rows, cols, data=data, shape=coords.shape[0])
             f.change_conformation(sm, sm, sm, sm)
             frustration_indices = f.configurational_frustration()[sm.row, sm.col]
