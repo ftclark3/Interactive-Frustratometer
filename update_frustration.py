@@ -227,12 +227,22 @@ while True:
                 #minimum_sequence_separation=f.min_sequence_separation_contact) # restrict selection to things that won't have an np.nan frustration index
             sm = SparseMatrix(rows, cols, data=data, shape=coords.shape[0])
             f.change_conformation(sm, sm, sm, sm)
-            frustration_indices = f.configurational_frustration()[sm.row, sm.col]
+            seqsep_rows = []
+            seqsep_cols = []
+            seqsep_data = []
+            for i in range(len(rows)):
+                seqsep = abs(rows[i] - cols[i])
+                if seqsep >= 7:
+                    seqsep_rows.append(rows[i])
+                    seqsep_cols.append(cols[i])
+                    seqsep_data.append(data[i])
+            frustration_indices = f.configurational_frustration()[seqsep_rows, seqsep_cols]
             assert not np.any(np.isnan(frustration_indices))
-            rho1 = f.rho_r[sm.row]
-            rho2 = f.rho_r[sm.col]
+            rho1 = f.rho_r[seqsep_rows]
+            rho2 = f.rho_r[seqsep_cols]
             sigma_wats = 0.25 * (1 - np.tanh(f.eta_sigma * (rho1 - f.rho_0))) * (1 - np.tanh(f.eta_sigma * (rho2 - f.rho_0)))
-            return sm, frustration_indices, sigma_wats
+            #return sm, frustration_indices, sigma_wats
+            return SparseMatrix(seqsep_rows, seqsep_cols, seqsep_data), frustration_indices, sigma_wats
         sm_of_distances, frustration_indices, sigma_wats = frustratometry_logic()
         assert len(sm_of_distances.row) == len(sm_of_distances.col) == len(sm_of_distances.data) == len(frustration_indices) == len(sigma_wats)
         to_return = get_return_string(sm_of_distances.row, sm_of_distances.col, sm_of_distances.data, frustration_indices, sigma_wats,
