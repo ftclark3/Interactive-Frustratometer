@@ -76,6 +76,12 @@ def get_sparse_contacts(coords, cutoff=40.0, minimum_sequence_separation=1):
                 rows.append(i)
                 cols.append(j)
                 data.append(dist)
+                # in the rho calculation in the frustratometer code, the distance matrix is
+                # assumed to have both pairs (i,j) and (j,i) populated,
+                # so we need to repeat it with the indices permuted
+                rows.append(j)
+                cols.append(i)
+                data.append(dist)
     # Return as NumPy arrays for the Frustratometer
     return np.array(rows), np.array(cols), np.array(data)
 
